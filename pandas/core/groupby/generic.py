@@ -666,6 +666,7 @@ class SeriesGroupBy(GroupBy[Series]):
     ):
         from pandas.core.reshape.tile import cut
         from pandas.core.api import unique
+
         if bins is not None and not np.iterable(bins):
             # scalar bins cannot be done at top level
             # in a backward compatible way
@@ -680,25 +681,24 @@ class SeriesGroupBy(GroupBy[Series]):
 
         # print(self.grouper.group_info)
 
-
         ids, _, _ = self.grouper.group_info
         # ids =
-        print(f'{ids=}')
+        print(f"{ids=}")
         val = self.obj._values
         codes = self.grouper.reconstructed_codes
-        print(f'{codes=}')
+        print(f"{codes=}")
+        print([ping.group_index for ping in self.grouper.groupings])
         # groupby removes null keys from groupings
         mask = ids != -1
         ids, val = ids[mask], val[mask]
 
-        # codes = [code[mask] for code in codes]
         from pandas.core.sorting import compress_group_index
-        print(f'{ids=}')
 
-        print('codes ', self.grouper.reconstructed_codes)
+        print(f"{ids=}")
+
+        print("codes ", self.grouper.reconstructed_codes)
         # groupings = self.grouper.groupings
-        used_ids = unique(ids)
-        '''
+        """
         # ids = compress_group_index(ids)[0]
         print(f'{ids=}')
 
@@ -707,7 +707,7 @@ class SeriesGroupBy(GroupBy[Series]):
         print(f'{icodes=}')
         codes = [code[0] for code in icodes]
         print(f'{codes=}')
-        '''
+        """
         # levels = [ping.group_index[codes[i][1]] for i, ping in enumerate(groupings)]
 
         if bins is None:
@@ -718,12 +718,20 @@ class SeriesGroupBy(GroupBy[Series]):
             val_lev = val_lab.cat.categories
             val_lab = val_lab.cat.codes.values
 
+        if dropna:
+            mask = val_lab != -1
+            if not mask.all():
+                ids, val_lab = ids[mask], val_lab[mask]
 
-        if is_interval_dtype(val_lab.dtype):
-            sorter = np.lexsort((val_lab.right, val_lab.left, ids))
-        else:
-            sorter = np.lexsort((val_lab, ids))
+        sorter = np.lexsort((val_lab, ids))
         ids, val_lab = ids[sorter], val_lab[sorter]
+        used_ids = unique(ids)
+        if max(used_ids) >= len(
+            codes[0]
+        ):  # this means we had something skipped from the start
+            used_ids = compress_group_index(used_ids)[0]
+        codes = [code[used_ids] for code in codes]  # drop what was taken out for n/a
+        print(f"{codes=}")
 
         # group boundaries are where group ids change
         # new values are where sorted labels change
@@ -732,46 +740,43 @@ class SeriesGroupBy(GroupBy[Series]):
         changes = np.r_[True, changes]
         print(changes, val_lab)
         val_lab = val_lab[changes]
+        print(f"{val_lab=}")
         ids = ids[changes]
-        print(f'{ids=}')
+        print(f"{ids=}")
 
         cts = np.diff(np.nonzero(np.r_[changes, True])[0])
-        # change_ids = (ids[1:] != ids[:-1])  # need to update now that we removed full repeats
 
         num_repeats = np.diff(np.nonzero(np.r_[True, change_ids, True]))[0]
-        # rep = partial(np.repeat, repeats=num_repeats)
-        idx = np.r_[0, 1+ np.nonzero(change_ids)[0]]
-        print(f'{idx=}')
+        rep = partial(np.repeat, repeats=num_repeats)
+        idx = np.r_[0, 1 + np.nonzero(change_ids)[0]]
+        # print(f'{idx=}')
 
         rep = partial(np.repeat, repeats=np.add.reduceat(changes, idx))
-        print(f'{rep=}')
-        if dropna:
-            mask = ~isna(val)
-            if not mask.all():
-                ids, val = ids[mask], val[mask]
-                
+        print(f"{rep=}")
+        change_ids = np.r_[
+            ids[1:] != ids[:-1], True
+        ]  # need to update now that we removed full repeats
+
         if (not dropna) and (-1 in val_lab):
             # in this case we need to explicitly add NaN as a level
             val_lev = np.r_[Index([np.nan]), val_lev]
             val_lab += 1
 
-        codes = [rep(level_codes) for level_codes in codes]
-
-        '''
+        """
         if dropna:
             included = val_lab != -1
             ids, val_lab = ids[included], val_lab[included]
             # codes = [code[included] for code in codes]
         print(f'{ids=}')
-        '''
+        """
         levels = [ping.group_index for ping in self.grouper.groupings]
-        print(f'{levels=}')
+        print(f"{levels=}")
         levels.append(Index(val_lev))
-        print(f'{levels=}')
+        print(f"{levels=}")
         names = self.grouper.names + [self._selection_name]
 
-        print(f'{cts=}')
-        print(f'{num_repeats=}')
+        print(f"{cts=}")
+        print(f"{num_repeats=}")
 
         if normalize:
             num_vals = []
@@ -779,18 +784,21 @@ class SeriesGroupBy(GroupBy[Series]):
             for i, r in enumerate(num_repeats):
                 num_vals.append(np.sum(cts[ix : ix + r]))
                 ix += r
-            print(f'{num_vals=}')
+            print(f"{num_vals=}")
 
             cts = cts.astype("float")
-            cts /= rep(num_repeats)  # each divisor is the number of repeats for that index
+            cts /= rep(
+                num_repeats
+            )  # each divisor is the number of repeats for that index
 
         if bins is None:
             # print(f'{unique(ids)=}')
             used_ids = unique(ids)
             # print(f'{used_ids=}')
-            codes += [val_lab]
             print(codes)
             # codes = [code[used_ids] for code in codes]
+            codes = [rep(level_codes) for level_codes in codes]
+            codes += [val_lab]
 
             if sort:
                 indices = tuple(reversed(codes[:-1]))
@@ -811,15 +819,21 @@ class SeriesGroupBy(GroupBy[Series]):
         nbin = len(levels[-1])
         ncat = len(codes[0])
         fout = np.zeros((ncat * nbin), dtype=float if normalize else np.int64)
-        print(f'{val_lab=}')
-        print(f'{ids=}')
-        print(f'{cts=}')
-
+        print(f"{val_lab=}")
+        print(f"{ids=}")
+        print(f"{cts=}")
+        id = 0
+        print(f"{change_ids=}")
         for i, ct in enumerate(cts):
-            fout[ids[i] * nbin + val_lab[i]] = ct
+            print(id * nbin + val_lab[i])
+            fout[id * nbin + val_lab[i]] = cts[i]
+            id += change_ids[i]
+
+        print(f"{fout=}")
+        print(f"{codes=}")
         ncodes = [np.repeat(code, nbin) for code in codes]
         ncodes.append(np.tile(range(nbin), len(codes[0])))
-
+        print(f"{ncodes=}")
         if sort:
             indices = tuple(reversed(ncodes[:-1]))
             sorter = np.lexsort(

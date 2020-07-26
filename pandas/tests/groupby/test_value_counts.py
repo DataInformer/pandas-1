@@ -123,6 +123,7 @@ def test_groubpy_value_counts_bins():
     """index = MultiIndex.from_product(
         [groups, sorted(intervals)], names=("key1", "key2", "score")
     )"""
+    print(f"{result.index=}", len(result.index))
     expected = Series(
         [1, 0, 1, 0, 0, 2, 1, 0, 0, 0, 0, 1, 0, 0, 1], result.index, name="score"
     )
